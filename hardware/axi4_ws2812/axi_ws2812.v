@@ -1,7 +1,8 @@
 module axi_ws2812 #(
-    parameter LED_RST_CNT = 'd28000, // 100M clk
+    parameter LED_RST_CNT = 'd30000, // 100M clk 300us
     parameter DATA_PERIOD_CNT = 'd125,
-    parameter DATA_HT_CNT = 'd80
+    parameter DATA_HT_CNT     = 'd65,
+    parameter DATA_LT_CNT     = 'd30
 )(
     input           clk,
     input           rstn,
@@ -16,7 +17,12 @@ module axi_ws2812 #(
     output          sdata
 );
 
-localparam DATA_LT_CNT = DATA_PERIOD_CNT - DATA_HT_CNT;
+// axi addr define
+localparam
+AXI_NUM = 4'h0,
+AXI_DAT = 4'h1,
+AXI_SAT = 4'h2,
+AXI_CNT = 4'h3;
 
 // state matchine
 localparam
@@ -35,7 +41,7 @@ reg     [1:0]   sdata_send_state;
 reg     [7:0]   led_num;
 reg 	[31:0]  rgb_data_read;
 reg             send_flag;
-reg     [31:0]  ahb_rdata;
+reg     [31:0]  rdata_reg;
 
 wire 	[23:0]  rgb_data;
 reg 	[23:0]  reg_rgb_data;
@@ -58,10 +64,10 @@ always @(posedge clk or negedge rstn) begin
     end
     else if (wr_en) begin
         case (waddr[5:2])
-            4'h0: begin
+            AXI_NUM: begin
                 led_num <= wdata[7:0];
             end
-            4'h1: begin
+            AXI_DAT: begin
                 for (j = 0; j <= 3; j = j + 1) begin
                     if (wstrb[j]) begin
                         rgb_data_read[8*j +: 8] <= wdata[8*j +: 8];
@@ -80,15 +86,15 @@ assign rgb_data = rgb_data_read[23:0];
 
 always @(*) begin
     case (raddr[5:2])
-        4'h0: ahb_rdata = {24'b0, led_num};
-        4'h1: ahb_rdata = {8'b0, rgb_data};
-        4'h2: ahb_rdata = {30'b0, ready_reg};
-        4'h3: ahb_rdata = {24'b0, send_data_cnt};
-        default: ahb_rdata = 32'h0;
+        AXI_NUM: rdata_reg = {24'b0, led_num};
+        AXI_DAT: rdata_reg = {8'b0, rgb_data};
+        AXI_SAT: rdata_reg = {30'b0, ready_reg};
+        AXI_CNT: rdata_reg = {24'b0, send_data_cnt};
+        default: rdata_reg = 32'h0;
     endcase
 end
 
-assign rdata = ahb_rdata;
+assign rdata = rdata_reg;
 
 always @(posedge clk or negedge rstn) begin
     if(rstn == 1'b0) begin
@@ -127,6 +133,10 @@ always @(posedge clk or negedge rstn) begin
                 end
             end
             RS_SEND: begin
+                if(send_flag == 1'b1) begin
+                    ready_reg <= 1'b0;
+                end
+
                 if((rgb_data_position == 5'd15) && (send_data_cnt != reg_led_num - 8'd1)) begin
                     ready_reg <= 1'b1;
                 end
