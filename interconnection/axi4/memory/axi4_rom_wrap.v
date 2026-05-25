@@ -1,9 +1,10 @@
 
 `timescale 1 ns / 1 ps
 
-	module axi4_ws2812_wrap #(
+	module axi4_rom_wrap #(
 		// Users to add parameters here
-
+		parameter integer ROM_ADDR_LEN	= 12,
+		parameter integer ROM_WIDTH	= 16,
 		// User parameters ends
 		// Do not modify the parameters beyond this line
 
@@ -25,7 +26,11 @@
 		parameter integer C_S_AXI_BUSER_WIDTH	= 0
 	) (
 		// Users to add ports here
-		output			sdata,
+		output			rom_clk,
+		output	[ROM_ADDR_LEN - 1:0]      rom_addr,
+		input   [ROM_WIDTH - 1:0]  rom_rdata,
+		output  [ROM_WIDTH - 1:0]  rom_wdata,
+		output			rom_rw,
 		// User ports ends
 		// Do not modify the ports beyond this line
 
@@ -399,8 +404,8 @@
 	                 begin                             
 	                   axi_awlen_cntr <= 0;                             
 	                   axi_awaddr <= S_AXI_AWADDR[C_S_AXI_ADDR_WIDTH - 1:0];                             
-	                 end                             
 	              end                             
+				end
 	        else if((axi_awlen_cntr < axi_awlen) && S_AXI_WVALID)                               
 	          begin                             
 	            axi_awlen_cntr <= axi_awlen_cntr + 1;                             
@@ -506,82 +511,35 @@
 	 endgenerate
 	// Add user logic here
 	wire mem_wren;
+	wire user_rd_valid;
  	// User logic ends 
 	// Add user logic here
     assign mem_wren = axi_wready && S_AXI_WVALID;
+	assign user_rd_valid = S_AXI_RVALID & S_AXI_RREADY;
 
-	axi_ws2812 axi_ws2812_inst (
+	axi_rom #(
+		.AXI_DATA_WIDTH(C_S_AXI_DATA_WIDTH),
+		.AXI_ADDR_LEN(OPT_MEM_ADDR_BITS + 1),
+		.ROM_WIDTH(ROM_WIDTH),
+		.ROM_ADDR_LEN(ROM_ADDR_LEN)
+	) axi_rom_inst (
     	.clk(S_AXI_ACLK),
     	.rstn(S_AXI_ARESETN),
 
-    	.waddr(axi_awaddr),
-    	.raddr(axi_araddr),
+    	.waddr(mem_address_write),
+    	.raddr(mem_address_read),
     	.wdata(S_AXI_WDATA),
     	.wr_en(mem_wren),
     	.wstrb(S_AXI_WSTRB),
     	.rdata(mem_data_out[0]),
 
-    	.sdata(sdata)
+		.user_rd_valid(user_rd_valid),
+    	.rom_clk(rom_clk),
+		.rom_addr(rom_addr),
+		.rom_rdata(rom_rdata),
+		.rom_wdata(rom_wdata),
+		.rom_rw(rom_rw)
 	);
  	// User logic ends 
 
 	endmodule
-
-// module
-// axi4_ws2812_wrap #( 
-// 	.C_S_AXI_ID_WIDTH(C_S00_AXI_ID_WIDTH),
-// 	.C_S_AXI_DATA_WIDTH(C_S00_AXI_DATA_WIDTH),
-// 	.C_S_AXI_ADDR_WIDTH(C_S00_AXI_ADDR_WIDTH),
-// 	.C_S_AXI_AWUSER_WIDTH(C_S00_AXI_AWUSER_WIDTH),
-// 	.C_S_AXI_ARUSER_WIDTH(C_S00_AXI_ARUSER_WIDTH),
-// 	.C_S_AXI_WUSER_WIDTH(C_S00_AXI_WUSER_WIDTH),
-// 	.C_S_AXI_RUSER_WIDTH(C_S00_AXI_RUSER_WIDTH),
-// 	.C_S_AXI_BUSER_WIDTH(C_S00_AXI_BUSER_WIDTH)
-// ) axi4_ws2812_wrap_inst (
-// 	.S_AXI_ACLK(s00_axi_aclk),
-// 	.S_AXI_ARESETN(s00_axi_aresetn),
-// 	.S_AXI_AWID(s00_axi_awid),
-// 	.S_AXI_AWADDR(s00_axi_awaddr),
-// 	.S_AXI_AWLEN(s00_axi_awlen),
-// 	.S_AXI_AWSIZE(s00_axi_awsize),
-// 	.S_AXI_AWBURST(s00_axi_awburst),
-// 	.S_AXI_AWLOCK(s00_axi_awlock),
-// 	.S_AXI_AWCACHE(s00_axi_awcache),
-// 	.S_AXI_AWPROT(s00_axi_awprot),
-// 	.S_AXI_AWQOS(s00_axi_awqos),
-// 	.S_AXI_AWREGION(s00_axi_awregion),
-// 	.S_AXI_AWUSER(s00_axi_awuser),
-// 	.S_AXI_AWVALID(s00_axi_awvalid),
-// 	.S_AXI_AWREADY(s00_axi_awready),
-// 	.S_AXI_WDATA(s00_axi_wdata),
-// 	.S_AXI_WSTRB(s00_axi_wstrb),
-// 	.S_AXI_WLAST(s00_axi_wlast),
-// 	.S_AXI_WUSER(s00_axi_wuser),
-// 	.S_AXI_WVALID(s00_axi_wvalid),
-// 	.S_AXI_WREADY(s00_axi_wready),
-// 	.S_AXI_BID(s00_axi_bid),
-// 	.S_AXI_BRESP(s00_axi_bresp),
-// 	.S_AXI_BUSER(s00_axi_buser),
-// 	.S_AXI_BVALID(s00_axi_bvalid),
-// 	.S_AXI_BREADY(s00_axi_bready),
-// 	.S_AXI_ARID(s00_axi_arid),
-// 	.S_AXI_ARADDR(s00_axi_araddr),
-// 	.S_AXI_ARLEN(s00_axi_arlen),
-// 	.S_AXI_ARSIZE(s00_axi_arsize),
-// 	.S_AXI_ARBURST(s00_axi_arburst),
-// 	.S_AXI_ARLOCK(s00_axi_arlock),
-// 	.S_AXI_ARCACHE(s00_axi_arcache),
-// 	.S_AXI_ARPROT(s00_axi_arprot),
-// 	.S_AXI_ARQOS(s00_axi_arqos),
-// 	.S_AXI_ARREGION(s00_axi_arregion),
-// 	.S_AXI_ARUSER(s00_axi_aruser),
-// 	.S_AXI_ARVALID(s00_axi_arvalid),
-// 	.S_AXI_ARREADY(s00_axi_arready),
-// 	.S_AXI_RID(s00_axi_rid),
-// 	.S_AXI_RDATA(s00_axi_rdata),
-// 	.S_AXI_RRESP(s00_axi_rresp),
-// 	.S_AXI_RLAST(s00_axi_rlast),
-// 	.S_AXI_RUSER(s00_axi_ruser),
-// 	.S_AXI_RVALID(s00_axi_rvalid),
-// 	.S_AXI_RREADY(s00_axi_rready)
-// );
