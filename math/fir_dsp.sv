@@ -1,5 +1,5 @@
 module fir_dsp#(
-    parameter integer FIR_TAP = 128,
+    parameter integer FIR_TAP = 64,
     parameter integer COE_WIDTH = 24,
     parameter integer DML_LEN = 22,
     parameter integer DATA_WIDTH = 16
@@ -200,16 +200,16 @@ blk_mem_gen_fir blk_mem_gen_fir_inst (
     .clka(clk),    // input wire clka
     .rsta(~rstn),            // input wire rsta
     .wea(data_input_trig),      // input wire [0 : 0] wea
-    .addra(mem_rw_addr_a[j]),  // input wire [6 : 0] addra
-    .dina(s_axis_tdata),    // input wire [15 : 0] dina
-    .douta(mem_odata_a[j]),  // output wire [15 : 0] douta
+    .addra(mem_rw_addr_a[j]),  // input wire [RW_ADDR_WIDTH-1 : 0] addra
+    .dina(s_axis_tdata),    // input wire [DATA_WIDTH-1 : 0] dina
+    .douta(mem_odata_a[j]),  // output wire [DATA_WIDTH-1 : 0] douta
 
     .clkb(clk),    // input wire clkb
     .rstb(~rstn),            // input wire rstb
     .web(1'b0),      // input wire [0 : 0] web
-    .addrb(mem_w_addr_b[j]),  // input wire [6 : 0] addrb
-    .dinb(16'b0),    // input wire [15 : 0] dinb
-    .doutb(mem_odata_b[j]),  // output wire [15 : 0] doutb
+    .addrb(mem_w_addr_b[j]),  // input wire [RW_ADDR_WIDTH-1 : 0] addrb
+    .dinb(16'b0),    // input wire [DATA_WIDTH-1 : 0] dinb
+    .doutb(mem_odata_b[j]),  // output wire [DATA_WIDTH-1 : 0] doutb
 
     .rsta_busy(mem_rsta_busy[j]),  // output wire rsta_busy
     .rstb_busy()  // output wire rstb_busy
@@ -217,8 +217,9 @@ blk_mem_gen_fir blk_mem_gen_fir_inst (
 
 dist_mem_gen_fir dist_mem_gen_fir_inst (
     .clk(clk),    // input wire clk
-    .a(rom_r_addr[j]),   // input wire [5 : 0] a
-    .qspo(rom_odata[j])  // output wire [23 : 0] spo
+    .a(rom_r_addr[j]),   // input wire [RW_ADDR_WIDTH-2 : 0] a
+    .qspo(rom_odata[j])  // output wire [COE_WIDTH-1 : 0] qspo
+    // .spo(rom_odata[j])  // output wire [COE_WIDTH-1 : 0] spo
 );
 end
 endgenerate
