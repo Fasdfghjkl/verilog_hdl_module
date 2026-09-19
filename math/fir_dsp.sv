@@ -44,7 +44,6 @@ logic signed [DATA_WIDTH-1:0] mem_odata_a[MULT_NUM-1:0];
 logic [RW_ADDR_WIDTH-1:0] mem_w_addr_b_base;
 logic [RW_ADDR_WIDTH-1:0] mem_w_addr_b[MULT_NUM-1:0];
 logic signed [DATA_WIDTH-1:0] mem_odata_b[MULT_NUM-1:0];
-logic mem_rsta_busy[MULT_NUM-1:0];
 logic [RW_ADDR_WIDTH-2:0] rom_r_addr_base;
 logic [RW_ADDR_WIDTH-2:0] rom_r_addr[MULT_NUM-1:0];
 logic signed [COE_WIDTH-1:0] rom_odata[MULT_NUM-1:0];
@@ -71,7 +70,7 @@ always_ff@(posedge clk or negedge rstn) begin
     end else begin
         case(state)
         IDLE: begin
-            if((s_axis_tvalid == 1'b1) && (mem_rsta_busy[0] == 1'b0))begin
+            if(data_input_trig == 1'b1)begin
                 state <= FIR_CAL;
             end
         end
@@ -84,8 +83,8 @@ always_ff@(posedge clk or negedge rstn) begin
         endcase
     end
 end
-assign s_axis_tready = (rstn == 1'b1) && (state == IDLE) && (mem_rsta_busy[0] == 1'b0);
-assign data_input_trig = (rstn == 1'b1) && (s_axis_tvalid == 1'b1) && (state == IDLE) && (mem_rsta_busy[0] == 1'b0);
+assign s_axis_tready = (rstn == 1'b1) && ((state == IDLE) || (rom_r_addr_base == FIR_N_HALF - MULT_NUM));
+assign data_input_trig = (rstn == 1'b1) && (s_axis_tvalid == 1'b1) && (state == IDLE);
 assign cal_flag = (state == FIR_CAL);
 
 // status pipeline
@@ -129,7 +128,7 @@ always_ff@(posedge clk or negedge rstn) begin
     if(rstn == 1'b0) begin
         mem_r_addr_a_base <= 'b0;
     end else if(cal_flag == 1'b1) begin
-        if(mem_r_addr_a_base - MULT_NUM > FIR_TAP - 1) begin
+        if(mem_r_addr_a_base < MULT_NUM) begin
             mem_r_addr_a_base <= FIR_TAP - (MULT_NUM - mem_r_addr_a_base);
         end else begin
             mem_r_addr_a_base <= mem_r_addr_a_base - MULT_NUM;
@@ -141,7 +140,7 @@ end
 always_comb begin
     for(integer i = 0; i < MULT_NUM; i++) begin
         if(cal_flag == 1'b1) begin
-            if(mem_r_addr_a_base - i > FIR_TAP - 1) begin
+            if(mem_r_addr_a_base < i) begin
                 mem_rw_addr_a[i] = FIR_TAP - (i - mem_r_addr_a_base);
             end else begin
                 mem_rw_addr_a[i] = mem_r_addr_a_base - i;
@@ -198,28 +197,22 @@ generate
 for(genvar j = 0; j < MULT_NUM; j++) begin
 blk_mem_gen_fir blk_mem_gen_fir_inst (
     .clka(clk),    // input wire clka
-    .rsta(~rstn),            // input wire rsta
     .wea(data_input_trig),      // input wire [0 : 0] wea
     .addra(mem_rw_addr_a[j]),  // input wire [RW_ADDR_WIDTH-1 : 0] addra
     .dina(s_axis_tdata),    // input wire [DATA_WIDTH-1 : 0] dina
     .douta(mem_odata_a[j]),  // output wire [DATA_WIDTH-1 : 0] douta
 
     .clkb(clk),    // input wire clkb
-    .rstb(~rstn),            // input wire rstb
-    .web(1'b0),      // input wire [0 : 0] web
+    .web('b0),      // input wire [0 : 0] web
     .addrb(mem_w_addr_b[j]),  // input wire [RW_ADDR_WIDTH-1 : 0] addrb
-    .dinb(16'b0),    // input wire [DATA_WIDTH-1 : 0] dinb
-    .doutb(mem_odata_b[j]),  // output wire [DATA_WIDTH-1 : 0] doutb
-
-    .rsta_busy(mem_rsta_busy[j]),  // output wire rsta_busy
-    .rstb_busy()  // output wire rstb_busy
+    .dinb('b0),    // input wire [DATA_WIDTH-1 : 0] dinb
+    .doutb(mem_odata_b[j])  // output wire [DATA_WIDTH-1 : 0] doutb
 );
 
 dist_mem_gen_fir dist_mem_gen_fir_inst (
     .clk(clk),    // input wire clk
     .a(rom_r_addr[j]),   // input wire [RW_ADDR_WIDTH-2 : 0] a
     .qspo(rom_odata[j])  // output wire [COE_WIDTH-1 : 0] qspo
-    // .spo(rom_odata[j])  // output wire [COE_WIDTH-1 : 0] spo
 );
 end
 endgenerate
