@@ -1,4 +1,4 @@
-module fir_dsp#(
+module fir_dsp_brust#(
     parameter integer FIR_TAP = 64,
     parameter integer COE_WIDTH = 24,
     parameter integer DML_LEN = 22,
@@ -30,10 +30,13 @@ FIR_CAL = 'h1;
 logic [0:0] state;
 logic data_input_trig;
 logic cal_flag;
+logic cal_end_flag;
 // status pipeline
-localparam integer CFLAG_PIPE_LEN = 3 + FIR_ACC_LEN;
-logic cflag_pl[CFLAG_PIPE_LEN-1:0];
-logic cflag_pl_end;
+localparam integer PIPE_LEN = 2 + FIR_ACC_LEN;
+logic cflag_pl[PIPE_LEN-1:0];
+logic cal_end_pl[PIPE_LEN:0];
+logic pl_acc_trig;
+logic pl_end_trig;
 logic dout_valid;
 // data storage & coefficient rom
 localparam integer RW_ADDR_WIDTH = $clog2(FIR_TAP);
@@ -60,7 +63,8 @@ localparam logic signed [DATA_WIDTH-1:0] SHIFT_DATA_MAX = {1'b0, {(DATA_WIDTH-1)
 localparam logic signed [DATA_WIDTH-1:0] SHIFT_DATA_MIN = {1'b1, {(DATA_WIDTH-1){1'b0}}};
 logic signed [MUL_WIDTH+ACC_WIDTH_INC-1:0] muled_data_acc0[ACC_STAGE0-1:0];
 logic signed [MUL_WIDTH+ACC_WIDTH_INC*2-1:0] muled_data_acc1[ACC_STAGE1-1:0];
-logic signed [ACC_WIDTH_END-1:0] muled_data_acc_end;
+logic signed [ACC_WIDTH_END-1:0] muled_data_acc_end[1:0];
+logic data_acc_sel;
 logic signed [ACC_WIDTH_END-1:0] scaled_data;
 
 // fir state
@@ -70,43 +74,59 @@ always_ff@(posedge clk or negedge rstn) begin
     end else begin
         case(state)
         IDLE: begin
-            if(data_input_trig == 1'b1)begin
+            if(s_axis_tvalid == 1'b1)begin
                 state <= FIR_CAL;
             end
         end
         FIR_CAL: begin
-            if(rom_r_addr_base == FIR_N_HALF - MULT_NUM) begin
-                state <= IDLE;
+            if(cal_end_flag == 1'b1) begin
+                if(s_axis_tvalid == 1'b0) begin
+                    state <= IDLE;
+                end
             end
         end
         default: state <= IDLE;
         endcase
     end
 end
-assign s_axis_tready = (rstn == 1'b1) && ((state == IDLE) || (rom_r_addr_base == FIR_N_HALF - MULT_NUM));
-assign data_input_trig = (rstn == 1'b1) && (s_axis_tvalid == 1'b1) && (state == IDLE);
+assign s_axis_tready = (state == IDLE) || (cal_end_flag == 1'b1);
+assign data_input_trig = (rstn == 1'b1) && (s_axis_tvalid == 1'b1) && (s_axis_tready == 1'b1);
 assign cal_flag = (state == FIR_CAL);
+assign cal_end_flag = (rom_r_addr_base == FIR_N_HALF - MULT_NUM);
 
 // status pipeline
 always_ff@(posedge clk or negedge rstn) begin
     if(rstn == 1'b0) begin
-        for(integer i = 0; i < CFLAG_PIPE_LEN; i++) begin
+        for(integer i = 0; i < PIPE_LEN; i++) begin
             cflag_pl[i] <= 1'b0;
         end
     end else begin
         cflag_pl[0] <= cal_flag;
-        for(integer i = 0; i < CFLAG_PIPE_LEN - 1; i++) begin
+        for(integer i = 0; i < PIPE_LEN - 1; i++) begin
             cflag_pl[i+1] <= cflag_pl[i];
         end
     end
 end
 
-assign cflag_pl_end = ~cflag_pl[CFLAG_PIPE_LEN-2] & cflag_pl[CFLAG_PIPE_LEN-1];
+always_ff@(posedge clk or negedge rstn) begin
+    if(rstn == 1'b0) begin
+        for(integer i = 0; i < PIPE_LEN + 1; i++) begin
+            cal_end_pl[i] <= 1'b0;
+        end
+    end else begin
+        cal_end_pl[0] <= cal_end_flag;
+        for(integer i = 0; i < PIPE_LEN; i++) begin
+            cal_end_pl[i+1] <= cal_end_pl[i];
+        end
+    end
+end
+assign pl_acc_trig = ~cal_end_pl[PIPE_LEN-2] & cal_end_pl[PIPE_LEN-1];
+assign pl_end_trig = ~cal_end_pl[PIPE_LEN-1] & cal_end_pl[PIPE_LEN];
 always_ff@(posedge clk or negedge rstn) begin
     if(rstn == 1'b0) begin
         dout_valid <= 1'b0;
     end else begin
-        dout_valid <= cflag_pl_end;
+        dout_valid <= pl_end_trig;
     end
 end
 assign m_axis_tvalid = dout_valid;
@@ -127,26 +147,30 @@ end
 always_ff@(posedge clk or negedge rstn) begin
     if(rstn == 1'b0) begin
         mem_r_addr_a_base <= 'b0;
+    end else if(data_input_trig == 1'b1) begin
+        if(mem_w_addr_a == FIR_TAP - 1) begin
+            mem_r_addr_a_base <= 'b0;
+        end else begin
+            mem_r_addr_a_base <= mem_w_addr_a + 1'b1;
+        end
     end else if(cal_flag == 1'b1) begin
         if(mem_r_addr_a_base < MULT_NUM) begin
             mem_r_addr_a_base <= FIR_TAP - (MULT_NUM - mem_r_addr_a_base);
         end else begin
             mem_r_addr_a_base <= mem_r_addr_a_base - MULT_NUM;
         end
-    end else begin
-        mem_r_addr_a_base <= mem_w_addr_a;
     end
 end
 always_comb begin
     for(integer i = 0; i < MULT_NUM; i++) begin
-        if(cal_flag == 1'b1) begin
+        if(data_input_trig == 1'b1) begin
+            mem_rw_addr_a[i] = mem_w_addr_a;
+        end else begin
             if(mem_r_addr_a_base < i) begin
                 mem_rw_addr_a[i] = FIR_TAP - (i - mem_r_addr_a_base);
             end else begin
                 mem_rw_addr_a[i] = mem_r_addr_a_base - i;
             end
-        end else begin
-            mem_rw_addr_a[i] = mem_w_addr_a;
         end
     end
 end
@@ -154,14 +178,20 @@ end
 always_ff@(posedge clk or negedge rstn) begin
     if(rstn == 1'b0) begin
         mem_w_addr_b_base <= 'b0;
+    end else if(data_input_trig == 1'b1) begin
+        if(mem_w_addr_a == FIR_TAP - 1) begin
+            mem_w_addr_b_base <= 'b1;
+        end else if(mem_w_addr_a == FIR_TAP - 2) begin
+            mem_w_addr_b_base <= 'b0;
+        end else begin
+            mem_w_addr_b_base <= mem_w_addr_a + 'h2;
+        end
     end else if(cal_flag == 1'b1) begin
         if(mem_w_addr_b_base + MULT_NUM > FIR_TAP - 1) begin
             mem_w_addr_b_base <= mem_w_addr_b_base + MULT_NUM - FIR_TAP;
         end else begin
             mem_w_addr_b_base <= mem_w_addr_b_base + MULT_NUM;
         end
-    end else begin
-        mem_w_addr_b_base <= mem_w_addr_a + 1'b1;
     end
 end
 always_comb begin
@@ -178,18 +208,16 @@ always_ff@(posedge clk or negedge rstn) begin
     if(rstn == 1'b0) begin
         rom_r_addr_base <= 'b0;
     end else if(cal_flag == 1'b1) begin
-        rom_r_addr_base <= rom_r_addr_base + MULT_NUM;
-    end else begin
-        rom_r_addr_base <= 'b0;
-    end
+        if(cal_end_flag == 1'b1) begin
+            rom_r_addr_base <= 'b0;
+        end else begin
+            rom_r_addr_base <= rom_r_addr_base + MULT_NUM;
+        end
+    end 
 end
 always_comb begin
     for(integer i = 0; i < MULT_NUM; i++) begin
-        if(cal_flag == 1'b1) begin
-            rom_r_addr[i] = rom_r_addr_base + i;
-        end else begin
-            rom_r_addr[i] = 'b0;
-        end
+        rom_r_addr[i] = rom_r_addr_base + i;
     end
 end
 
@@ -203,7 +231,7 @@ blk_mem_gen_fir blk_mem_gen_fir_inst (
     .douta(mem_odata_a[j]),  // output wire [DATA_WIDTH-1 : 0] douta
 
     .clkb(clk),    // input wire clkb
-    .web('b0),      // input wire [0 : 0] web
+    .web(1'b0),      // input wire [0 : 0] web
     .addrb(mem_w_addr_b[j]),  // input wire [RW_ADDR_WIDTH-1 : 0] addrb
     .dinb('b0),    // input wire [DATA_WIDTH-1 : 0] dinb
     .doutb(mem_odata_b[j])  // output wire [DATA_WIDTH-1 : 0] doutb
@@ -232,7 +260,7 @@ always_ff@(posedge clk or negedge rstn) begin
     if(rstn == 1'b0) begin
         mem_odata_add[k] <= 'sb0;
     end else if(cflag_pl[0] == 1'b1) begin
-        mem_odata_add[k] <= mem_odata_a[k] + mem_odata_b[k];
+        mem_odata_add[k] <= $signed({mem_odata_a[k][DATA_WIDTH-1], mem_odata_a[k]}) + $signed({mem_odata_b[k][DATA_WIDTH-1], mem_odata_b[k]});
     end
 end
 always_ff@(posedge clk or negedge rstn) begin
@@ -258,8 +286,6 @@ always_ff@(posedge clk or negedge rstn) begin
             sum_temp = sum_temp + mem_odata_mul[i+q*FIR_ACC_TIME];
         end
         muled_data_acc0[q] <= sum_temp;
-    end else begin
-        muled_data_acc0[q] <= 'sb0;
     end
 end
 end
@@ -276,32 +302,39 @@ always_ff@(posedge clk or negedge rstn) begin
             sum_temp = sum_temp + muled_data_acc0[i+p*FIR_ACC_TIME];
         end
         muled_data_acc1[p] <= sum_temp;
-    end else begin
-        muled_data_acc1[p] <= 'sb0;
     end
 end
 end
 endgenerate
 always_ff@(posedge clk or negedge rstn) begin
     if(rstn == 1'b0) begin
-        muled_data_acc_end <= 'sb0;
+        for(integer i = 0; i < 2; i++) begin
+            muled_data_acc_end[i] <= 'sb0;
+        end
     end else if(cflag_pl[4] == 1'b1) begin
         automatic logic signed [ACC_WIDTH_END-1:0] sum_temp;
         sum_temp = 'sb0;
         for (integer i = 0; i < ACC_STAGE1; i++) begin
             sum_temp = sum_temp + muled_data_acc1[i];
         end
-        muled_data_acc_end <= muled_data_acc_end + sum_temp;
-    end else begin
-        muled_data_acc_end <= 'sb0;
+        muled_data_acc_end[data_acc_sel] <= muled_data_acc_end[data_acc_sel] + sum_temp;
+        muled_data_acc_end[~data_acc_sel] <= 'sb0;
+    end
+end
+
+always_ff@(posedge clk or negedge rstn) begin
+    if(rstn == 1'b0) begin
+        data_acc_sel <= 1'b0;
+    end else if(pl_acc_trig == 1'b1) begin
+        data_acc_sel <= ~data_acc_sel;
     end
 end
 
 always_ff@(posedge clk or negedge rstn) begin
     if(rstn == 1'b0) begin
         scaled_data <= 'sb0;
-    end else if(cflag_pl_end == 1'b1) begin
-        scaled_data <= muled_data_acc_end >>> DML_LEN;
+    end else if(pl_end_trig == 1'b1) begin
+        scaled_data <= muled_data_acc_end[~data_acc_sel] >>> DML_LEN;
     end
 end
 assign m_axis_tdata =
