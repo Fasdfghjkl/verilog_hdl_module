@@ -17,7 +17,8 @@ module seg7_static (
     output reg [6:0] seg5
 );
 
-parameter SEG_0 = 7'b100_0000, SEG_1 = 7'b1111_1001,
+parameter
+SEG_0 = 7'b100_0000, SEG_1 = 7'b111_1001,
 SEG_2 = 7'b010_0100, SEG_3 = 7'b011_0000,
 SEG_4 = 7'b001_1001, SEG_5 = 7'b001_0010,
 SEG_6 = 7'b000_0010, SEG_7 = 7'b111_1000,
